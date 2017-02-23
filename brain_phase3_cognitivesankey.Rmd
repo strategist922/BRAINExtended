@@ -1,0 +1,140 @@
+---
+title: "BRAIN-ICU: Long-Term Cognitive Followup"
+output: html_notebook
+---
+
+```{r datamgmt}
+## -- Riverplot for BRAIN-ICU followup out to six years --------------------------------------------
+op <- options(gvis.plot.tag='chart')
+
+load('/Volumes/thomps23/ICUDelirium/BRAINICU/braindata.Rdata')
+
+library(tidyverse)
+library(googleVis)
+
+## -- Create data set with node values for each patient at each time point -------------------------
+## Contains patients who remained alive and in study at 3m
+keepPts <- subset(brain.fu,
+                  fu.period == '3 Month' &
+                    status %in% c('Living', 'Living-Active in the study', 'Visit Not Completed'))$id
+
+## Create dummy data set - one record per patient per time point, regardless of whether followup
+## data exists
+dfDummy <- expand.grid(keepPts, 1:5)
+names(dfDummy) <- c('id', 'timept')
+
+## Get time points that patient died and/or withdrew
+brain.fu$timept <- with(brain.fu, ifelse(fu.period == '3 Month', 1,
+                                  ifelse(fu.period == '12 Month', 2,
+                                  ifelse(fu.period == '12 Month Mortality', 3,
+                                  ifelse(fu.period == '4 year', 4,
+                                  ifelse(fu.period == '6 year', 5, NA))))))
+
+dfFirstDied <- brain.fu %>%
+  filter(status == 'Deceased') %>%
+  group_by(id) %>%
+  summarise(firstDied = head(timept, n = 1))
+
+dfFirstWD <- brain.fu %>%
+  filter(status == 'Living-Withdrew from the study') %>%
+  group_by(id) %>%
+  summarise(firstWD = head(timept, n = 1))
+
+brainStatus <- brain.fu %>%
+  left_join(dfDummy, ., by = c('id', 'timept')) %>%
+  left_join(dfFirstDied, by = 'id') %>%
+  left_join(dfFirstWD, by = 'id') %>%
+  filter(timept != 3) %>%
+  dplyr::select(id, fu.period, timept, status, firstDied, firstWD, rbans.global.score) %>%
+  mutate(currentStatus = factor(ifelse(!is.na(rbans.global.score) & rbans.global.score > 78, 1,
+                                ifelse(!is.na(rbans.global.score), 2,
+                                ifelse(!is.na(firstDied) & firstDied <= timept, 3,
+                                ## Combine all "unknowns": withdrawals, no data entered, no test score
+                                ifelse(!is.na(firstWD) & firstWD <= timept |
+                                         is.na(status) |
+                                         status %in% c('Living', 'Living-Active in the study',
+                                                       'Lost to Follow-Up - Case Closed',
+                                                       'Visit Not Completed'), 4, NA)))),
+                                levels = 1:4,
+                                labels = c('Normal cognition', 'Cognitive impairment',
+                                           'Died', 'Unknown'))) %>%
+  unite(currentNode, currentStatus, timept, remove = FALSE) %>%
+  arrange(id, timept)
+
+## -- Use googleVis to create Sankey plot ----------------------------------------------------------
+library(googleVis)
+
+## Calculate number of patients in each node/edge
+sankeyData <- brainStatus %>%
+  ## Relabel nodes
+  mutate(timeAbbrev = as.character(factor(timept,
+                                          levels = c(1, 2, 4, 5),
+                                          labels = c('3m', '12m', '4yr', '6yr')))) %>%
+  unite(sourceNode, currentStatus, timeAbbrev, sep = ', ', remove = FALSE) %>%
+  group_by(id) %>%
+  mutate(targetNode = lead(sourceNode)) %>%
+  ungroup() %>%
+  filter(!is.na(targetNode)) %>%
+  group_by(sourceNode, targetNode) %>%
+  summarise(weight = n()) %>%
+  ## Try arranging in the order I want to see if that works...
+  separate(sourceNode, into = c('sourceStatus', 'sourceTime'), sep = ', ', remove = FALSE) %>%
+  separate(targetNode, into = c('targetStatus', 'targetTime'), sep = ', ', remove = FALSE) %>%
+  mutate(sourceStatusSort = ifelse(sourceStatus == 'Normal cognition', 1,
+                            ifelse(sourceStatus == 'Cognitive impairment', 2,
+                            ifelse(sourceStatus == 'Died', 4, 3))),
+         sourceTimeSort = ifelse(sourceTime == '3m', 1,
+                          ifelse(sourceTime == '12m', 2,
+                          ifelse(sourceTime == '4yr', 3, 4))),
+         targetStatusSort = ifelse(targetStatus == 'Normal cognition', 1,
+                            ifelse(targetStatus == 'Cognitive impairment', 2,
+                            ifelse(targetStatus == 'Died', 4, 3))),
+         targetTimeSort = ifelse(targetTime == '3m', 1,
+                          ifelse(targetTime == '12m', 2,
+                          ifelse(targetTime == '4yr', 3, 4)))) %>%
+  arrange(sourceTimeSort, sourceStatusSort, targetTimeSort, targetStatusSort) %>%
+  dplyr::select(sourceNode, targetNode, weight, sourceTimeSort:targetStatusSort) %>%
+  ungroup()
+
+## Get total Ns for each sourceNode
+sourceNs <- sankeyData %>%
+  group_by(sourceNode) %>%
+  summarise(sourceN = sum(weight))
+
+## Add Ns onto main sankeyData, create text for tooltip (transition, N / denom, %)
+sankeyData <- sankeyData %>%
+  left_join(sourceNs, by = 'sourceNode') %>%
+  mutate(info.tooltip = paste0('<b>', sourceNode, ' -> ', targetNode, ':</b><br>',
+                               weight, '/', sourceN, ' (', round((weight / sourceN)*100), '%)'))
+
+```
+
+```{r create_googlevis}
+## Create googleVis object
+gvisBRAIN <- gvisSankey(sankeyData,
+                        from = 'sourceNode',
+                        to = 'targetNode',
+                        weight = 'weight',
+                        options = list(height = 600, width = 1000, tooltip = "{isHtml:'True'}",
+                                       sankey = "{link: { colorMode: 'gradient' },
+                                                  node: { colors: ['#3D7900', '#3D7900', '#AC0001',
+                                                                   '#0057AC', 'black', '#AC0001',
+                                                                   '#0057AC', '#3D7900', '#AC0001',
+                                                                   '#0057AC', 'black', '#3D7900',
+                                                                   '#AC0001', '#0057AC', 'black'],
+                                                          label: { color: '#003D79',
+                                                                   fontSize: 14,
+                                                                   bold: true } },
+                                                  iterations: 0
+                                                 }"))
+
+## 0057AC: blue (unknown)
+## 3D7900: green (normal)
+## AC0001: red (impaired)
+## black: died
+```
+
+```{r print_googlevis, results = 'asis'}
+plot(gvisBRAIN)
+
+```
