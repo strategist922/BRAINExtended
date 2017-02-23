@@ -1,0 +1,385 @@
+---
+title: "BRAIN-ICU: Long-Term Followup among All Patients"
+output:
+  html_notebook:
+    theme: yeti
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    code_folding: hide
+---
+
+```{r setup}
+knitr::opts_chunk$set(message = FALSE, fig.width = 8.5)
+
+## Option to print only chart aspect of googleVis objects, not full HTML
+op <- options(gvis.plot.tag='chart')
+
+library(tidyverse)
+library(googleVis)
+library(viridis)
+
+## -- Load data, stored in separate directory ------------------------------------------------------
+if(Sys.info()['sysname'] == 'Darwin'){
+  load('/Volumes/thomps23/ICUDelirium/BRAINICU/braindata.Rdata')
+} else{
+  load('/home/thomps23/ICUDelirium/BRAINICU/braindata.Rdata')  
+}
+
+```
+
+The following plots show the progress of all BRAIN-ICU patients through the entirety of long-term
+followup, up to six years after discharge from the index ICU admission.
+
+# Data Management
+
+```{r initial_datamgmt}
+## -- Create data set with node values for each patient at each time point -------------------------
+## Contains patients who did not withdraw in the hospital
+keepPts <- subset(brain.oneobs, is.na(studywd.amt))$id
+
+## How many (what %) of patients withdrew in hospital and are excluded?
+rmPts <- setdiff(brain.oneobs$id, keepPts)
+nPtsRm <- length(rmPts)
+pctPtsRm <- round((nPtsRm / length(brain.oneobs$id))*100)
+
+## -- Use brain.oneobs and brain.fu to determine whether, at each time point, patient was... -------
+## - deceased
+## - unknown (followup only) - no test score, withdrawn, lost to followup
+## - alive, no known impairment (IQCODE < 3.6 @ baseline for discharge, RBANS > 78 at followup)
+## - alive, with impairment (IQCODE >= 3.6 @ baseline for discharge, RBANS <= 78 at followup)
+
+## Create dummy data set with one record per patient per time point (inc. 12m mortality, since
+## death may be entered there)
+shell_df <- expand.grid(keepPts, 1:6)
+names(shell_df) <- c('id', 'timept')
+
+## Add timept variables to brain.oneobs, brain.fu
+brain.oneobs$timept <- 1
+brain.fu$timept <- with(brain.fu, ifelse(fu.period == '3 Month', 2,
+                                  ifelse(fu.period == '12 Month', 3,
+                                  ifelse(fu.period == '12 Month Mortality', 4,
+                                  ifelse(fu.period == '4 year', 5, 6)))))
+
+## Combine data needed to determine status at each time point
+shell_df <- shell_df %>%
+  left_join(dplyr::select(brain.oneobs, id, timept, died.inhosp, studywd, iqcode.score.e),
+            by = c('id', 'timept')) %>%
+  left_join(dplyr::select(brain.fu, id, timept, status, rbans.global.score),
+            by = c('id', 'timept')) %>%
+  ## Create indicators for whether patient died, withdrew at a given time point; these are absorbing
+  ## states
+  mutate(died_now = ifelse(timept == 1, died.inhosp == 'Died in hospital', status == 'Deceased'),
+         wd_now = ifelse(timept == 1, studywd == 'Yes', status == 'Living-Withdrew from the study'))
+
+## Figure out first time point of death, withdrawal for each patient
+dfFirstDied <- shell_df %>%
+  filter(died_now) %>%
+  arrange(id, timept) %>%
+  group_by(id) %>%
+  summarise(firstDied = head(timept, n = 1))
+
+dfFirstWD <- shell_df %>%
+  filter(wd_now) %>%
+  arrange(id, timept) %>%
+  group_by(id) %>%
+  summarise(firstWD = head(timept, n = 1))
+
+## Merge death, withdrawal time points back onto shell data; determine current status at each time
+brainStatus <- reduce(list(shell_df, dfFirstDied, dfFirstWD), .f = left_join, by = 'id') %>%
+  ## 12m mortality "time point" only means anything if patient died; we've already got that info
+  filter(timept != 4) %>%
+  mutate(generalStatus = factor(ifelse(!is.na(firstDied) & timept >= firstDied, 6,
+                                ifelse(!is.na(firstWD) & timept >= firstWD, 5,
+                                ifelse(timept == 1 & iqcode.score.e < 3.6, 1,
+                                ifelse(timept == 1, 2,
+                                ifelse(is.na(rbans.global.score), 5,
+                                ifelse(rbans.global.score <= 78, 4, 3)))))),
+                                levels = 1:6,
+                                labels = c('No baseline impairment',
+                                           'Mild CI at baseline',
+                                           'Normal cognition',
+                                           'Cognitive impairment',
+                                           'Unknown',
+                                           'Died')),
+         timelabel = ifelse(timept == 1 & generalStatus != 'Died', '',
+                     ifelse(timept == 1, 'in hospital',
+                     ifelse(timept == 2, '3m',
+                     ifelse(timept == 3, '12m',
+                     ifelse(timept == 5, '4yr', '6yr'))))),
+         sourceNode = ifelse(timept == 1 & generalStatus != 'Died', as.character(generalStatus),
+                      ifelse(timept == 1, paste(as.character(generalStatus), timelabel),
+                             paste(as.character(generalStatus), timelabel, sep = ', ')))) %>%
+  arrange(id, timept)
+
+```
+
+Our starting point for all figures is all `r nrow(brain.oneobs)` patients enrolled in BRAIN-ICU,
+aside from `r nPtsRm` (`r pctPtsRm`%) who withdrew in the hospital, leaving a total of
+**`r length(keepPts)`**.
+
+Patients are classified as "unknown" at a given time point if they were, to the best of our
+knowledge, still alive and had not withdrawn from the study, but have no cognitive assessment data
+available. This could be because the followup team was unable to contact them at all, or could be
+because they were contacted but had no or an incomplete cognitive assessment. This missingness is,
+therefore, quite likely to be informative: patients who are sicker are less likely to complete an
+assessment, and it is likely that these patients would have performed more poorly on those 
+assessments.
+
+# Progress Throughout Study
+
+The following Sankey plot shows patient progression throughout the six years of BRAIN-ICU enrollment
+and followup.
+
+```{r create_sankey}
+## -- Use googleVis to create Sankey plot ----------------------------------------------------------
+## Calculate number of patients in each node/edge
+sankeyData <- brainStatus %>%
+  group_by(id) %>%
+  mutate(targetNode = lead(sourceNode)) %>%
+  ungroup() %>%
+  filter(!is.na(targetNode)) %>%
+  group_by(sourceNode, targetNode) %>%
+  summarise(weight = n()) %>%
+  ## Try arranging in the order I want to see if that works...
+  separate(sourceNode, into = c('sourceStatus', 'sourceTime'),
+           sep = ', ', remove = FALSE, fill = 'right') %>%
+  separate(targetNode, into = c('targetStatus', 'targetTime'),
+           sep = ', ', remove = FALSE, fill = 'right') %>%
+  mutate(sourceStatusSort = ifelse(sourceStatus %in% c('Normal cognition', 'No baseline impairment'),
+                                   1,
+                            ifelse(sourceStatus %in% c('Cognitive impairment', 'Mild CI at baseline'),
+                                   2,
+                            ifelse(sourceStatus %in% c('Died', 'Died in hospital'), 4, 3))),
+         sourceTimeSort = ifelse(is.na(sourceTime), 1,
+                          ifelse(sourceTime == '3m', 2,
+                          ifelse(sourceTime == '12m', 3,
+                          ifelse(sourceTime == '4yr', 4, 5)))),
+         targetStatusSort = ifelse(targetStatus %in% c('Normal cognition', 'No baseline impairment'),
+                                   1,
+                            ifelse(targetStatus %in% c('Cognitive impairment', 'Mild CI at baseline'),
+                                   2,
+                            ifelse(targetStatus %in% c('Died', 'Died in hospital'), 4, 3))),
+         targetTimeSort = ifelse(is.na(targetTime), 1,
+                          ifelse(targetTime == '3m', 2,
+                          ifelse(targetTime == '12m', 3,
+                          ifelse(targetTime == '4yr', 4, 5))))) %>%
+  arrange(sourceTimeSort, sourceStatusSort, targetTimeSort, targetStatusSort) %>%
+  dplyr::select(sourceNode, targetNode, weight, sourceTimeSort:targetStatusSort) %>%
+  ungroup()
+
+## Get total Ns for each sourceNode
+sourceNs <- sankeyData %>%
+  group_by(sourceNode) %>%
+  summarise(sourceN = sum(weight))
+
+## Add Ns onto main sankeyData, create text for tooltip (transition, N / denom, %)
+sankeyData <- sankeyData %>%
+  left_join(sourceNs, by = 'sourceNode') %>%
+  mutate(info.tooltip = paste0('<b>', sourceNode, ' -> ', targetNode, ':</b><br>',
+                               weight, '/', sourceN, ' (', round((weight / sourceN)*100), '%)'))
+
+## Create googleVis object
+gvisBRAIN <- gvisSankey(sankeyData,
+                        from = 'sourceNode',
+                        to = 'targetNode',
+                        weight = 'weight',
+                        options = list(height = 600, width = 1000, tooltip = "{isHtml:'True'}",
+                                       sankey = "{link: { colorMode: 'gradient' },
+                                                  node: { colors: ['#3D7900', '#3D7900', '#AC0001',
+                                                                   '#0057AC', 'black', '#AC0001',
+                                                                   'black', '#3D7900', '#AC0001',
+                                                                   '#0057AC', 'black', '#3D7900',
+                                                                   '#AC0001', '#0057AC', 'black',
+                                                                   '#3D7900', '#AC0001', '#0057AC',
+                                                                   'black'],
+                                                          label: { color: '#003D79',
+                                                                   fontSize: 14,
+                                                                   bold: true } },
+                                                  iterations: 0
+                                                 }"))
+
+## 0057AC: blue (unknown)
+## 3D7900: green (normal)
+## AC0001: red (impaired)
+## black: died
+
+```
+
+```{r print_sankey, results = 'asis'}
+## For creating separate file
+# print(gvisBRAIN, file = 'brain_phase3_sankey.html')
+print(gvisBRAIN, tag = 'chart')
+
+```
+
+# Status at Each Time Point, All Patients
+
+The plot below shows status (normal, impaired, unknown, or deceased) at each time point as a
+proportion of all `r length(keepPts)` patients who remained in the study during and after their
+hospital stay. "Unknown" is a combination of patients who withdrew during followup, who could not be
+contacted, and who had incomplete assessments.
+
+```{r bar_allpts}
+bardataAll <- brainStatus %>%
+  group_by(timept) %>%
+  summarise(propNormal = mean(generalStatus %in% c('No baseline impairment', 'Normal cognition'),
+                              na.rm = TRUE),
+            propImpaired = mean(generalStatus %in% c('Mild CI at baseline', 'Cognitive impairment'),
+                                na.rm = TRUE),
+            propUnknown = mean(generalStatus == 'Unknown', na.rm = TRUE),
+            propDied = mean(generalStatus == 'Died', na.rm = TRUE)) %>%
+  gather(key = status, value = proportion, propNormal:propDied) %>%
+  mutate(time.f = factor(timept,
+                         levels = c(1:3, 5:6),
+                         labels = c('In-Hospital', '3 Months', '12 Months', '4 Years', '6 Years')),
+         status.f = factor(ifelse(timept == 1 & status == 'propNormal', 1,
+                           ifelse(timept == 1 & status == 'propImpaired', 2,
+                           ifelse(timept == 1 & status == 'propDied', 3,
+                           ifelse(status == 'propNormal', 4,
+                           ifelse(status == 'propImpaired', 5,
+                           ifelse(status == 'propUnknown', 6,
+                           ifelse(status == 'propDied', 7, NA))))))),
+                           levels = 1:7,
+                           labels = c('No\nbaseline\nCI',
+                                      'Mild\nCI,\nbaseline',
+                                      'Died\nin\nhospital',
+                                      'No CI',
+                                      'CI',
+                                      'Unknown',
+                                      'Died'))) %>%
+  filter(proportion > 0)
+
+ggbarAll <- ggplot(data = bardataAll, aes(x = status.f, y = proportion)) +
+  facet_wrap(~ time.f, scales = 'free_x', nrow = 1, drop = TRUE) +
+  geom_bar(aes(fill = status), stat = 'identity') +
+  scale_fill_manual(values = viridis(4)[1:4]) +
+  scale_x_discrete(name = NULL) +
+  scale_y_continuous(name = NULL,
+                     limits = c(0, 1),
+                     breaks = seq(0, 1, 0.1),
+                     labels = paste0(seq(0, 1, 0.1)*100, '%')) +
+  labs(title = 'Status by Time Point among All Patients',
+       caption = paste('Proportion of all', length(keepPts),
+                       'patients who remained in the study throughout their hospital stay.\n"Cognitive impairment" (CI) is defined by RBANS global score <=78.')) +
+  # theme_minimal() +
+  theme(legend.position = 'none',
+        strip.text = element_text(face = 'bold'),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_text(size = 7.5),
+        plot.caption = element_text(face = 'italic', colour = 'grey40'))
+
+```
+
+```{r print_bar_allpts, results = 'asis'}
+ggbarAll
+
+```
+
+# Status at Each Time Point, Patients with Known Status
+
+The plot below shows status (normal, impaired, or deceased) at each time point as a proportion of
+all patients for whom status is known at each time point.
+
+```{r bar_knownpts}
+bardataKnown <- brainStatus %>%
+  filter(generalStatus != 'Unknown') %>%
+  group_by(timept) %>%
+  summarise(propNormal = mean(generalStatus %in% c('No baseline impairment', 'Normal cognition'),
+                              na.rm = TRUE),
+            propImpaired = mean(generalStatus %in% c('Mild CI at baseline', 'Cognitive impairment'),
+                                na.rm = TRUE),
+            propDied = mean(generalStatus == 'Died', na.rm = TRUE)) %>%
+  gather(key = status, value = proportion, propNormal:propDied) %>%
+  mutate(time.f = factor(timept,
+                         levels = c(1:3, 5:6),
+                         labels = c('In-Hospital', '3 Months', '12 Months', '4 Years', '6 Years')),
+         status.f = factor(ifelse(timept == 1 & status == 'propNormal', 1,
+                           ifelse(timept == 1 & status == 'propImpaired', 2,
+                           ifelse(timept == 1 & status == 'propDied', 3,
+                           ifelse(status == 'propNormal', 4,
+                           ifelse(status == 'propImpaired', 5,
+                           ifelse(status == 'propDied', 6, NA)))))),
+                           levels = 1:6,
+                           labels = c('No\nbaseline\nCI',
+                                      'Mild\nCI,\nbaseline',
+                                      'Died\nin\nhospital',
+                                      'No CI',
+                                      'CI',
+                                      'Died')))
+
+ggbarKnown <- ggplot(data = bardataKnown, aes(x = status.f, y = proportion)) +
+  facet_wrap(~ time.f, scales = 'free_x', nrow = 1, drop = TRUE) +
+  geom_bar(aes(fill = status), stat = 'identity') +
+  scale_fill_manual(values = viridis(4)[1:3]) +
+  scale_x_discrete(name = NULL) +
+  scale_y_continuous(name = NULL,
+                     limits = c(0, 1),
+                     breaks = seq(0, 1, 0.1),
+                     labels = paste0(seq(0, 1, 0.1)*100, '%')) +
+  labs(title = 'Status by Time Point among Patients with Known Status',
+       caption = paste('Proportion of patients who had complete cognitive assessments or were known to be deceased.\n"Cognitive impairment" (CI) is defined by RBANS global score <=78.')) +
+  theme(legend.position = 'none',
+        strip.text = element_text(face = 'bold'),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_text(size = 7.5),
+        plot.caption = element_text(face = 'italic', colour = 'grey40'))
+
+```
+
+```{r print_bar_knownpts, results = 'asis'}
+ggbarKnown
+
+```
+
+# Status at Each Time Point, Patients with Complete Assessment
+
+The plot below shows status (normal or impaired) at each time point as a proportion of all patients
+who had a complete cognitive assessment (or survived the hospital stay, in panel 1) at each time
+point.
+
+```{r bar_assessedpts}
+bardataAssessed <- brainStatus %>%
+  filter(!(generalStatus %in% c('Died', 'Unknown'))) %>%
+  group_by(timept) %>%
+  summarise(propNormal = mean(generalStatus %in% c('No baseline impairment', 'Normal cognition'),
+                              na.rm = TRUE),
+            propImpaired = mean(generalStatus %in% c('Mild CI at baseline', 'Cognitive impairment'),
+                                na.rm = TRUE)) %>%
+  gather(key = status, value = proportion, propNormal:propImpaired) %>%
+  mutate(time.f = factor(timept,
+                         levels = c(1:3, 5:6),
+                         labels = c('Enrollment', '3 Months', '12 Months', '4 Years', '6 Years')),
+         status.f = factor(ifelse(timept == 1 & status == 'propNormal', 1,
+                           ifelse(timept == 1 & status == 'propImpaired', 2,
+                           ifelse(status == 'propNormal', 3,
+                           ifelse(status == 'propImpaired', 4, NA)))),
+                           levels = 1:4,
+                           labels = c('No baseline CI',
+                                      'Mild CI,\nbaseline',
+                                      'No CI',
+                                      'CI')))
+
+ggbarAssessed <- ggplot(data = bardataAssessed, aes(x = status.f, y = proportion)) +
+  facet_wrap(~ time.f, scales = 'free_x', nrow = 1, drop = TRUE) +
+  geom_bar(aes(fill = status), stat = 'identity') +
+  scale_fill_manual(values = viridis(4)[2:3]) +
+  scale_x_discrete(name = NULL) +
+  scale_y_continuous(name = NULL,
+                     limits = c(0, 1),
+                     breaks = seq(0, 1, 0.1),
+                     labels = paste0(seq(0, 1, 0.1)*100, '%')) +
+  labs(title = 'Status by Time Point among Patients with Complete Assessments',
+       caption = paste('Proportion of patients who had complete cognitive assessments (or survived hospital stay).\n"Cognitive impairment" (CI) is defined by RBANS global score <=78.')) +
+  theme(legend.position = 'none',
+        strip.text = element_text(face = 'bold'),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_text(size = 7.5),
+        plot.caption = element_text(face = 'italic', colour = 'grey40'))
+
+```
+
+```{r print_bar_assessedpts, results = 'asis'}
+ggbarAssessed
+
+```
