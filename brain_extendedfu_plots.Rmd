@@ -43,6 +43,14 @@ rmPts <- setdiff(brain.oneobs$id, keepPts)
 nPtsRm <- length(rmPts)
 pctPtsRm <- round((nPtsRm / length(brain.oneobs$id))*100)
 
+## Vectors of patient IDs for various subsets:
+## SICU admissions
+ptsSICU <- subset(brain.oneobs, id %in% keepPts & icu.type == 'Surgical')$id
+## Patients >= 65
+pts65 <- subset(brain.oneobs, id %in% keepPts & age.enroll >= 65)$id
+## Patients >= 75
+pts75 <- subset(brain.oneobs, id %in% keepPts & age.enroll >= 75)$id
+
 ## -- Use brain.oneobs and brain.fu to determine whether, at each time point, patient was... -------
 ## -- deceased; unknown (followup only - no test score, withdrawn, lost to followup); alive, no ---- ## -- known impairment; alive, with impairment -----------------------------------------------------
 ## "Impairment" defined as...
