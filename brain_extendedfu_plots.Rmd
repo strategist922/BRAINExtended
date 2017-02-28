@@ -66,7 +66,8 @@ shell_df <- shell_df %>%
   left_join(dplyr::select(brain.oneobs, id, timept, died.inhosp, studywd, iqcode.score.e),
             by = c('id', 'timept')) %>%
   left_join(dplyr::select(brain.fu,
-                          id, timept, status, rbans.global.score, trail.a.tscore, trail.b.tscore),
+                          id, timept, status, rbans.global.score, trail.a.tscore, trail.b.tscore,
+                          rbans.delayedmem.tscore),
             by = c('id', 'timept')) %>%
   ## Create indicators for whether patient died, withdrew at a given time point; these are absorbing
   ## states
@@ -107,6 +108,21 @@ brainStatus <- reduce(list(shell_df, dfFirstDied, dfFirstWD), .f = left_join, by
                                            'Cognitive impairment',
                                            'Unknown',
                                            'Died')),
+         generalStatusDM = factor(ifelse(!is.na(firstDied) & timept >= firstDied, 6,
+                                  ifelse(!is.na(firstWD) & timept >= firstWD, 5,
+                                  ifelse(timept == 1 & iqcode.score.e < 3.6, 1,
+                                  ifelse(timept == 1, 2,
+                                  ifelse(is.na(rbans.delayedmem.tscore), 5,
+                                  ifelse((!is.na(rbans.delayedmem.tscore) &
+                                            rbans.delayedmem.tscore <= 78), 4,
+                                         3)))))),
+                                  levels = 1:6,
+                                  labels = c('No baseline impairment',
+                                             'Mild CI at baseline',
+                                             'Normal delayed memory',
+                                             'Impaired delayed memory',
+                                             'Unknown',
+                                             'Died')),
          timelabel = ifelse(timept == 1 & generalStatus != 'Died', '',
                      ifelse(timept == 1, 'in hospital',
                      ifelse(timept == 2, '3m',
@@ -114,7 +130,10 @@ brainStatus <- reduce(list(shell_df, dfFirstDied, dfFirstWD), .f = left_join, by
                      ifelse(timept == 5, '4yr', '6yr'))))),
          sourceNode = ifelse(timept == 1 & generalStatus != 'Died', as.character(generalStatus),
                       ifelse(timept == 1, paste(as.character(generalStatus), timelabel),
-                             paste(as.character(generalStatus), timelabel, sep = ', ')))) %>%
+                             paste(as.character(generalStatus), timelabel, sep = ', '))),
+         sourceNodeDM = ifelse(timept == 1 & generalStatus != 'Died', as.character(generalStatusDM),
+                        ifelse(timept == 1, paste(as.character(generalStatusDM), timelabel),
+                               paste(as.character(generalStatusDM), timelabel, sep = ', ')))) %>%
   arrange(id, timept)
 
 ```
@@ -131,70 +150,100 @@ therefore, quite likely to be informative: patients who are sicker are less like
 assessment, and it is likely that these patients would have performed more poorly on those 
 assessments.
 
-# Progress Throughout Study
+# Broad Cognitive Impairment among Entire BRAIN-ICU Cohort
+## Progress Throughout Study
 
 The following Sankey plot shows patient progression throughout the six years of BRAIN-ICU enrollment
 and followup.
 
-```{r create_sankey}
-## -- Use googleVis to create Sankey plot ----------------------------------------------------------
-## Calculate number of patients in each node/edge
-sankeyData <- brainStatus %>%
-  group_by(id) %>%
-  mutate(targetNode = lead(sourceNode)) %>%
-  ungroup() %>%
-  filter(!is.na(targetNode)) %>%
-  group_by(sourceNode, targetNode) %>%
-  summarise(weight = n()) %>%
-  ## Try arranging in the order I want to see if that works...
-  separate(sourceNode, into = c('sourceStatus', 'sourceTime'),
-           sep = ', ', remove = FALSE, fill = 'right') %>%
-  separate(targetNode, into = c('targetStatus', 'targetTime'),
-           sep = ', ', remove = FALSE, fill = 'right') %>%
-  mutate(sourceStatusSort = ifelse(sourceStatus %in% c('Normal cognition',
-                                                       'No baseline impairment'),
-                                   1,
-                            ifelse(sourceStatus %in% c('Cognitive impairment',
-                                                       'Mild CI at baseline'),
-                                   2,
-                            ifelse(sourceStatus %in% c('Died', 'Died in hospital'), 4, 3))),
-         sourceTimeSort = ifelse(is.na(sourceTime), 1,
-                          ifelse(sourceTime == '3m', 2,
-                          ifelse(sourceTime == '12m', 3,
-                          ifelse(sourceTime == '4yr', 4, 5)))),
-         targetStatusSort = ifelse(targetStatus %in% c('Normal cognition',
-                                                       'No baseline impairment'),
-                                   1,
-                            ifelse(targetStatus %in% c('Cognitive impairment',
-                                                       'Mild CI at baseline'),
-                                   2,
-                            ifelse(targetStatus %in% c('Died', 'Died in hospital'), 4, 3))),
-         targetTimeSort = ifelse(is.na(targetTime), 1,
-                          ifelse(targetTime == '3m', 2,
-                          ifelse(targetTime == '12m', 3,
-                          ifelse(targetTime == '4yr', 4, 5))))) %>%
-  arrange(sourceTimeSort, sourceStatusSort, targetTimeSort, targetStatusSort) %>%
-  dplyr::select(sourceNode, targetNode, weight, sourceTimeSort:targetStatusSort) %>%
-  ungroup()
+```{r sankey_functions}
+## -- Function to create Sankey plot data given a data frame (brainStatus or a subset) -------------
+createSankeyData <- function(df = brainStatus,
+                             impairType = c('overall', 'delayedmem')){
+  
+  ## impairType: whether to look at overall cognitive impairment or specifically delayed memory
+  ## Default: overall
+  impairType <- match.arg(impairType)
+  
+  ## If we're looking specifically at delayed memory, remove overall sourceNode variable and rename
+  ## sourceNodeDM
+  if(impairType == 'delayedmem'){
+    df <- df %>%
+      dplyr::select(-sourceNode) %>%
+      rename(sourceNode = sourceNodeDM)
+  }
+  
+  ## Create data.frame
+  sankeyData <- df %>%
+    group_by(id) %>%
+    mutate(targetNode = lead(sourceNode)) %>%
+    ungroup() %>%
+    filter(!is.na(targetNode)) %>%
+    group_by(sourceNode, targetNode) %>%
+    summarise(weight = n()) %>%
+    ## Try arranging in the order I want to see if that works...
+    separate(sourceNode, into = c('sourceStatus', 'sourceTime'),
+             sep = ', ', remove = FALSE, fill = 'right') %>%
+    separate(targetNode, into = c('targetStatus', 'targetTime'),
+             sep = ', ', remove = FALSE, fill = 'right') %>%
+    mutate(sourceStatusSort = ifelse(sourceStatus %in% c('Normal cognition',
+                                                         'Normal delayed memory',
+                                                         'No baseline impairment'),
+                                     1,
+                              ifelse(sourceStatus %in% c('Cognitive impairment',
+                                                         'Impaired delayed memory',
+                                                         'Mild CI at baseline'),
+                                     2,
+                              ifelse(sourceStatus %in% c('Died', 'Died in hospital'), 4, 3))),
+           sourceTimeSort = ifelse(is.na(sourceTime), 1,
+                            ifelse(sourceTime == '3m', 2,
+                            ifelse(sourceTime == '12m', 3,
+                            ifelse(sourceTime == '4yr', 4, 5)))),
+           targetStatusSort = ifelse(targetStatus %in% c('Normal cognition',
+                                                         'Normal delayed memory',
+                                                         'No baseline impairment'),
+                                     1,
+                              ifelse(targetStatus %in% c('Cognitive impairment',
+                                                         'Impaired delayed memory',
+                                                         'Mild CI at baseline'),
+                                     2,
+                              ifelse(targetStatus %in% c('Died', 'Died in hospital'), 4, 3))),
+           targetTimeSort = ifelse(is.na(targetTime), 1,
+                            ifelse(targetTime == '3m', 2,
+                            ifelse(targetTime == '12m', 3,
+                            ifelse(targetTime == '4yr', 4, 5))))) %>%
+    arrange(sourceTimeSort, sourceStatusSort, targetTimeSort, targetStatusSort) %>%
+    dplyr::select(sourceNode, targetNode, weight, sourceTimeSort:targetStatusSort) %>%
+    ungroup()
+  
+  ## Get total Ns for each sourceNode
+  sourceNs <- sankeyData %>%
+    group_by(sourceNode) %>%
+    summarise(sourceN = sum(weight))
+  
+  ## Add Ns onto main sankeyData, create text for tooltip (transition, N / denom, %)
+  sankeyData <- sankeyData %>%
+    left_join(sourceNs, by = 'sourceNode') %>%
+    mutate(info.tooltip = paste0('<b>', sourceNode, ' -> ', targetNode, ':</b><br>',
+                                 weight, '/', sourceN, ' (', round((weight / sourceN)*100), '%)'))
+  
+  return(sankeyData)  
+}
 
-## Get total Ns for each sourceNode
-sourceNs <- sankeyData %>%
-  group_by(sourceNode) %>%
-  summarise(sourceN = sum(weight))
-
-## Add Ns onto main sankeyData, create text for tooltip (transition, N / denom, %)
-sankeyData <- sankeyData %>%
-  left_join(sourceNs, by = 'sourceNode') %>%
-  mutate(info.tooltip = paste0('<b>', sourceNode, ' -> ', targetNode, ':</b><br>',
-                               weight, '/', sourceN, ' (', round((weight / sourceN)*100), '%)'))
-
-## Create googleVis object
-gvisBRAIN <- gvisSankey(sankeyData,
-                        from = 'sourceNode',
-                        to = 'targetNode',
-                        weight = 'weight',
-                        options = list(height = 600, width = 1000, tooltip = "{isHtml:'True'}",
-                                       sankey = "{link: { colorMode: 'gradient' },
+## -- Function to create googleVis Sankey plot using data from createSankeyData --------------------
+createSankeyPlot <- function(sData){
+  ## 0057AC: blue (unknown)
+  ## 3D7900: green (normal)
+  ## AC0001: red (impaired)
+  ## black: died
+  
+  ## Create googleVis object
+  gvisBRAIN <- gvisSankey(sData,
+                          from = 'sourceNode',
+                          to = 'targetNode',
+                          weight = 'weight',
+                          options = list(height = 600, width = 1000, tooltip = "{isHtml:'True'}",
+                                         sankey = "{link: { colorMode: 'gradient' },
                                                   node: { colors: ['#3D7900', '#3D7900', '#AC0001',
                                                                    '#0057AC', 'black', '#AC0001',
                                                                    'black', '#3D7900', '#AC0001',
@@ -207,22 +256,24 @@ gvisBRAIN <- gvisSankey(sankeyData,
                                                                    bold: true } },
                                                   iterations: 0
                                                  }"))
+}
 
-## 0057AC: blue (unknown)
-## 3D7900: green (normal)
-## AC0001: red (impaired)
-## black: died
+```
+
+```{r sankey_overall}
+sankeyDataAll <- createSankeyData()
+sankeyPlotAll <- createSankeyPlot(sankeyDataAll)
 
 ```
 
 ```{r print_sankey, results = 'asis'}
 ## For creating separate file
 # print(gvisBRAIN, file = 'brain_phase3_sankey.html')
-print(gvisBRAIN, tag = 'chart')
+print(sankeyPlotAll, tag = 'chart')
 
 ```
 
-# Status at Each Time Point, All Patients
+## Status at Each Time Point, All Patients
 
 The plot below shows status (normal, impaired, unknown, or deceased) at each time point as a
 proportion of all `r length(keepPts)` patients who remained in the study during and after their
@@ -285,7 +336,7 @@ ggbarAll
 
 ```
 
-# Status at Each Time Point, Patients with Known Status
+## Status at Each Time Point, Patients with Known Status
 
 The plot below shows status (normal, impaired, or deceased) at each time point as a proportion of
 all patients for whom status is known at each time point.
@@ -341,7 +392,7 @@ ggbarKnown
 
 ```
 
-# Status at Each Time Point, Patients with Complete Assessment
+## Status at Each Time Point, Patients with Complete Assessment
 
 The plot below shows status (normal or impaired) at each time point as a proportion of all patients
 who had a complete cognitive assessment (or survived the hospital stay, in panel 1) at each time
@@ -390,5 +441,21 @@ ggbarAssessed <- ggplot(data = bardataAssessed, aes(x = status.f, y = proportion
 
 ```{r print_bar_assessedpts, results = 'asis'}
 ggbarAssessed
+
+```
+
+# Impaired Delayed Memory among Entire BRAIN-ICU Cohort
+## Progress Throughout Study
+
+```{r sankey_delayed}
+sankeyDataDM <- createSankeyData(impairType = 'delayedmem')
+sankeyPlotDM <- createSankeyPlot(sankeyDataDM)
+
+```
+
+```{r print_sankey_delayed, results = 'asis'}
+## For creating separate file
+# print(gvisBRAIN, file = 'brain_phase3_sankey.html')
+print(sankeyPlotDM, tag = 'chart')
 
 ```
