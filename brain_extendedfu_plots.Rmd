@@ -44,10 +44,10 @@ nPtsRm <- length(rmPts)
 pctPtsRm <- round((nPtsRm / length(brain.oneobs$id))*100)
 
 ## -- Use brain.oneobs and brain.fu to determine whether, at each time point, patient was... -------
-## - deceased
-## - unknown (followup only) - no test score, withdrawn, lost to followup
-## - alive, no known impairment (IQCODE < 3.6 @ baseline for discharge, RBANS > 78 at followup)
-## - alive, with impairment (IQCODE >= 3.6 @ baseline for discharge, RBANS <= 78 at followup)
+## -- deceased; unknown (followup only - no test score, withdrawn, lost to followup); alive, no ---- ## -- known impairment; alive, with impairment -----------------------------------------------------
+## "Impairment" defined as...
+## - IQCODE >= 3.6 at baseline
+## - RBANS <=78, Trails A <=35 and/or Trails B <=35 at followup
 
 ## Create dummy data set with one record per patient per time point (inc. 12m mortality, since
 ## death may be entered there)
@@ -65,7 +65,8 @@ brain.fu$timept <- with(brain.fu, ifelse(fu.period == '3 Month', 2,
 shell_df <- shell_df %>%
   left_join(dplyr::select(brain.oneobs, id, timept, died.inhosp, studywd, iqcode.score.e),
             by = c('id', 'timept')) %>%
-  left_join(dplyr::select(brain.fu, id, timept, status, rbans.global.score),
+  left_join(dplyr::select(brain.fu,
+                          id, timept, status, rbans.global.score, trail.a.tscore, trail.b.tscore),
             by = c('id', 'timept')) %>%
   ## Create indicators for whether patient died, withdrew at a given time point; these are absorbing
   ## states
@@ -93,8 +94,12 @@ brainStatus <- reduce(list(shell_df, dfFirstDied, dfFirstWD), .f = left_join, by
                                 ifelse(!is.na(firstWD) & timept >= firstWD, 5,
                                 ifelse(timept == 1 & iqcode.score.e < 3.6, 1,
                                 ifelse(timept == 1, 2,
-                                ifelse(is.na(rbans.global.score), 5,
-                                ifelse(rbans.global.score <= 78, 4, 3)))))),
+                                ifelse(is.na(rbans.global.score) & is.na(trail.a.tscore) &
+                                         is.na(trail.b.tscore), 5,
+                                ifelse((!is.na(rbans.global.score) & rbans.global.score <= 78) |
+                                         (!is.na(trail.a.tscore) & trail.a.tscore <= 35) |
+                                         (!is.na(trail.b.tscore) & trail.b.tscore <= 35), 4,
+                                       3)))))),
                                 levels = 1:6,
                                 labels = c('No baseline impairment',
                                            'Mild CI at baseline',
@@ -146,18 +151,22 @@ sankeyData <- brainStatus %>%
            sep = ', ', remove = FALSE, fill = 'right') %>%
   separate(targetNode, into = c('targetStatus', 'targetTime'),
            sep = ', ', remove = FALSE, fill = 'right') %>%
-  mutate(sourceStatusSort = ifelse(sourceStatus %in% c('Normal cognition', 'No baseline impairment'),
+  mutate(sourceStatusSort = ifelse(sourceStatus %in% c('Normal cognition',
+                                                       'No baseline impairment'),
                                    1,
-                            ifelse(sourceStatus %in% c('Cognitive impairment', 'Mild CI at baseline'),
+                            ifelse(sourceStatus %in% c('Cognitive impairment',
+                                                       'Mild CI at baseline'),
                                    2,
                             ifelse(sourceStatus %in% c('Died', 'Died in hospital'), 4, 3))),
          sourceTimeSort = ifelse(is.na(sourceTime), 1,
                           ifelse(sourceTime == '3m', 2,
                           ifelse(sourceTime == '12m', 3,
                           ifelse(sourceTime == '4yr', 4, 5)))),
-         targetStatusSort = ifelse(targetStatus %in% c('Normal cognition', 'No baseline impairment'),
+         targetStatusSort = ifelse(targetStatus %in% c('Normal cognition',
+                                                       'No baseline impairment'),
                                    1,
-                            ifelse(targetStatus %in% c('Cognitive impairment', 'Mild CI at baseline'),
+                            ifelse(targetStatus %in% c('Cognitive impairment',
+                                                       'Mild CI at baseline'),
                                    2,
                             ifelse(targetStatus %in% c('Died', 'Died in hospital'), 4, 3))),
          targetTimeSort = ifelse(is.na(targetTime), 1,
@@ -261,7 +270,7 @@ ggbarAll <- ggplot(data = bardataAll, aes(x = status.f, y = proportion)) +
                      labels = paste0(seq(0, 1, 0.1)*100, '%')) +
   labs(title = 'Status by Time Point among All Patients',
        caption = paste('Proportion of all', length(keepPts),
-                       'patients who remained in the study throughout their hospital stay.\n"Cognitive impairment" (CI) is defined by RBANS global score <=78.')) +
+                       'patients who remained in the study throughout their hospital stay.\n"Cognitive impairment" (CI) is defined by RBANS global score <=78 and/or Trailmaking A or B score <=35.')) +
   # theme_minimal() +
   theme(legend.position = 'none',
         strip.text = element_text(face = 'bold'),
@@ -318,7 +327,7 @@ ggbarKnown <- ggplot(data = bardataKnown, aes(x = status.f, y = proportion)) +
                      breaks = seq(0, 1, 0.1),
                      labels = paste0(seq(0, 1, 0.1)*100, '%')) +
   labs(title = 'Status by Time Point among Patients with Known Status',
-       caption = paste('Proportion of patients who had complete cognitive assessments or were known to be deceased.\n"Cognitive impairment" (CI) is defined by RBANS global score <=78.')) +
+       caption = paste('Proportion of patients who had complete cognitive assessments or were known to be deceased.\n"Cognitive impairment" (CI) is defined by RBANS global score <=78 and/or Trailmaking A or B score <=35.')) +
   theme(legend.position = 'none',
         strip.text = element_text(face = 'bold'),
         axis.ticks.x = element_blank(),
@@ -370,7 +379,7 @@ ggbarAssessed <- ggplot(data = bardataAssessed, aes(x = status.f, y = proportion
                      breaks = seq(0, 1, 0.1),
                      labels = paste0(seq(0, 1, 0.1)*100, '%')) +
   labs(title = 'Status by Time Point among Patients with Complete Assessments',
-       caption = paste('Proportion of patients who had complete cognitive assessments (or survived hospital stay).\n"Cognitive impairment" (CI) is defined by RBANS global score <=78.')) +
+       caption = paste('Proportion of patients who had complete cognitive assessments (or survived hospital stay).\n"Cognitive impairment" (CI) is defined by RBANS global score <=78 and/or Trailmaking A or B score <=35.')) +
   theme(legend.position = 'none',
         strip.text = element_text(face = 'bold'),
         axis.ticks.x = element_blank(),
