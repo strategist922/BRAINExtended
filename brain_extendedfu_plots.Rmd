@@ -258,7 +258,7 @@ createSankeyPlot <- function(sData){
                           from = 'sourceNode',
                           to = 'targetNode',
                           weight = 'weight',
-                          options = list(height = 600, width = 1000, tooltip = "{isHtml:'True'}",
+                          options = list(height = 600, width = 800, tooltip = "{isHtml:'True'}",
                                          sankey = "{link: { colorMode: 'gradient' },
                                                   node: { colors: ['#3D7900', '#3D7900', '#AC0001',
                                                                    '#0057AC', 'black', '#AC0001',
@@ -542,7 +542,7 @@ initial BRAIN-ICU enrollment.
 ### Progress Throughout Study
 
 ```{r sankey_65}
-sankeyDatag65 <- createSankeyData(df = brainStatus %>% filter(id %in% pts65))
+sankeyDatag65 <- createSankeyData(df = brainStatus %>% filter(id %in% ptsg65))
 sankeyPlotg65 <- createSankeyPlot(sankeyDatag65)
 
 sankeyDatal65 <- createSankeyData(df = brainStatus %>% filter(id %in% ptsl65))
@@ -622,5 +622,92 @@ ggbar65Assessed <-
 
 ```{r print_bar_65_assessedpts, results = 'asis'}
 ggbar65Assessed
+
+```
+
+## <75 vs >=75 at Enrollment
+### Progress Throughout Study
+
+```{r sankey_75}
+sankeyDatag75 <- createSankeyData(df = brainStatus %>% filter(id %in% ptsg75))
+sankeyPlotg75 <- createSankeyPlot(sankeyDatag75)
+
+sankeyDatal75 <- createSankeyData(df = brainStatus %>% filter(id %in% ptsl75))
+sankeyPlotl75 <- createSankeyPlot(sankeyDatal75)
+
+```
+
+#### Patients >= 75 at Enrollment
+```{r print_sankey_g75, results = 'asis'}
+## For creating separate file
+# print(gvisBRAIN, file = 'brain_phase3_sankey.html')
+print(sankeyPlotg75, tag = 'chart')
+
+```
+
+#### Patients < 75 at Enrollment
+```{r print_sankey_l75, results = 'asis'}
+## For creating separate file
+# print(gvisBRAIN, file = 'brain_phase3_sankey.html')
+print(sankeyPlotl75, tag = 'chart')
+
+```
+
+### Status at Each Time Point, All Patients
+
+```{r bar_75_allpts}
+bardata75All <- createBarData(facetVar = 'ageGroup75')
+ggbar75All <- createBarPlot(df = bardata75All,
+                            facetVar = 'ageGroup75',
+                            plotTitle = 'Status by Time Point among All Patients, Split at Age 75',
+                            captionProp = paste('Proportion of all patients who remained in the study throughout their hospital stay.'))
+
+```
+
+```{r print_bar_75_allpts, results = 'asis'}
+ggbar75All
+
+```
+
+### Status at Each Time Point, Patients with Known Status
+
+The plot below shows status (normal, impaired, or deceased) at each time point as a proportion of
+all patients for whom status is known at each time point.
+
+```{r bar_75_knownpts}
+bardata75Known <- createBarData(brainStatus %>% filter(generalStatus != 'Unknown'),
+                                facetVar = 'ageGroup75')
+ggbar75Known <- createBarPlot(df = bardata75Known,
+                              facetVar = 'ageGroup75',
+                              plotTitle = 'Status by Time Point among Patients with Known Status, Split at Age 75',
+                              captionProp = 'Proportion of patients who had complete cognitive assessments or were known to be deceased.')
+
+```
+
+```{r print_bar_75_knownpts, results = 'asis'}
+ggbar75Known
+
+```
+
+### Status at Each Time Point, Patients with Complete Assessment
+
+The plot below shows status (normal or impaired) at each time point as a proportion of all patients
+who had a complete cognitive assessment (or survived the hospital stay, in panel 1) at each time
+point.
+
+```{r bar_75_assessedpts}
+bardata75Assessed <- createBarData(brainStatus %>%
+                                     filter(!(generalStatus %in% c('Died', 'Unknown'))),
+                                   facetVar = 'ageGroup75')
+ggbar75Assessed <-
+  createBarPlot(df = bardata75Assessed,
+                facetVar = 'ageGroup75',
+                plotTitle = 'Status by Time Point among Patients with Complete Assessments, Split at Age 75',
+                captionProp = 'Proportion of patients who had complete cognitive assessments (or survived hospital stay, Panel 1).')
+
+```
+
+```{r print_bar_75_assessedpts, results = 'asis'}
+ggbar75Assessed
 
 ```
