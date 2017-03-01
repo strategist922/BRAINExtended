@@ -151,17 +151,14 @@ brainStatus <- reduce(list(shell_df, dfFirstDied, dfFirstWD), .f = left_join, by
 
 ```
 
-Our starting point for all figures is all `r nrow(brain.oneobs)` patients enrolled in BRAIN-ICU,
-aside from `r nPtsRm` (`r pctPtsRm`%) who withdrew in the hospital, leaving a total of
-**`r length(keepPts)`**.
+Our starting point for is the `r nrow(brain.oneobs)` patients enrolled in BRAIN-ICU, aside from `r nPtsRm` (`r pctPtsRm`%) who withdrew in the hospital, leaving a total of **`r length(keepPts)`**.
 
 Patients are classified as "unknown" at a given time point if they were, to the best of our
-knowledge, still alive and had not withdrawn from the study, but have no cognitive assessment data
-available. This could be because the followup team was unable to contact them at all, or could be
-because they were contacted but had no or an incomplete cognitive assessment. This missingness is,
-therefore, quite likely to be informative: patients who are sicker are less likely to complete an
-assessment, and it is likely that these patients would have performed more poorly on those 
-assessments.
+knowledge, still alive and had not withdrawn from the study, but have no assessment data available.
+This could be because the followup team was unable to contact them at all, or could be because they
+were contacted but had no or an incomplete assessment. This missingness is, therefore, quite likely
+to be informative: patients who are sicker are less likely to complete an assessment, and it is
+likely that these patients would have performed more poorly on those assessments.
 
 # Broad Cognitive Impairment among Entire BRAIN-ICU Cohort
 ## Progress Throughout Study
@@ -310,7 +307,7 @@ createBarData <- function(df = brainStatus,
       rename(generalStatus = generalStatusDM)
     
     noImpText <- 'No imp.'
-    ImpText <- 'Impaired'
+    ImpText <- 'Imp.'
   } else{
     noImpText <- 'No CI'
     ImpText <- 'CI'
@@ -386,9 +383,9 @@ createBarPlot <- function(df,
 bardataAll <- createBarData()
 ggbarAll <- createBarPlot(df = bardataAll,
                           plotTitle = 'Status by Time Point among All Patients',
-                          captionProp = paste0('Proportion of all',
-                                               length(keepPts),
-                                               'patients who remained in the study throughout their hospital stay.'))
+                          captionProp = paste('Proportion of all',
+                                              length(keepPts),
+                                              'patients who remained in the study throughout their hospital stay.'))
 
 ```
 
@@ -426,7 +423,7 @@ bardataAssessed <- createBarData(brainStatus %>% filter(!(generalStatus %in% c('
 ggbarAssessed <-
   createBarPlot(df = bardataAssessed,
                 plotTitle = 'Status by Time Point among Patients with Complete Assessments',
-                captionProp = 'Proportion of patients who had complete cognitive assessments (or survived hospital stay).')
+                captionProp = 'Proportion of patients who had complete cognitive assessments (or survived hospital stay, Panel 1).')
 
 ```
 
@@ -448,5 +445,61 @@ sankeyPlotDM <- createSankeyPlot(sankeyDataDM)
 ## For creating separate file
 # print(gvisBRAIN, file = 'brain_phase3_sankey.html')
 print(sankeyPlotDM, tag = 'chart')
+
+```
+
+## Delayed Memory at Each Time Point, All Patients
+```{r bar_dm_allpts}
+bardataDMAll <- createBarData(impairType = 'delayedmem')
+ggbarDMAll <- createBarPlot(df = bardataDMAll,
+                            plotTitle = 'Delayed Memory by Time Point among All Patients',
+                            captionProp = paste0('Proportion of all',
+                                                 length(keepPts),
+                                                 'patients who remained in the study throughout their hospital stay.'),
+                            captionCI = '"Impairment" defined by RBANS delayed memory score <= 78.')
+
+```
+
+```{r print_bar_dm_allpts, results = 'asis'}
+ggbarDMAll
+
+```
+
+## Delayed Memory at Each Time Point, Patients with Known Status
+```{r bar_dm_known}
+bardataDMKnown <- createBarData(df = brainStatus %>% filter(generalStatusDM != 'Unknown'),
+                                impairType = 'delayedmem')
+ggbarDMKnown <- createBarPlot(df = bardataDMKnown,
+                              plotTitle = 'Delayed Memory by Time Point among Patients with Known Status',
+                              captionProp = 'Proportion of patients who had RBANS delayed memory scores or were known to be deceased.',
+                              captionCI = '"Impairment" defined by RBANS delayed memory score <= 78.')
+
+```
+
+```{r print_bar_dm_known, results = 'asis'}
+ggbarDMKnown
+
+```
+
+
+## Delayed Memory at Each Time Point, Patients with Complete Assessment
+
+The plot below shows status (normal or impaired) at each time point as a proportion of all patients
+who had a complete delayed memory assessment (or survived the hospital stay, in panel 1) at each time point.
+
+```{r bar_dm_assessedpts}
+bardataDMAssessed <- createBarData(brainStatus %>%
+                                     filter(!(generalStatusDM %in% c('Died', 'Unknown'))),
+                                   impairType = 'delayedmem')
+ggbarDMAssessed <-
+  createBarPlot(df = bardataDMAssessed,
+                plotTitle = 'Delayed Memory by Time Point among Patients with Complete Assessments',
+                captionProp = 'Proportion of patients who had RBANS delayed memory scores.',
+                              captionCI = '"Impairment" defined by RBANS delayed memory score <= 78.')
+
+```
+
+```{r print_bar_dm_assessedpts, results = 'asis'}
+ggbarDMAssessed
 
 ```
