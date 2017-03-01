@@ -293,54 +293,102 @@ proportion of all `r length(keepPts)` patients who remained in the study during 
 hospital stay. "Unknown" is a combination of patients who withdrew during followup, who could not be
 contacted, and who had incomplete assessments.
 
-```{r bar_allpts}
-bardataAll <- brainStatus %>%
-  group_by(timept) %>%
-  summarise(propNormal = mean(generalStatus %in% c('No baseline impairment', 'Normal cognition'),
-                              na.rm = TRUE),
-            propImpaired = mean(generalStatus %in% c('Mild CI at baseline', 'Cognitive impairment'),
-                                na.rm = TRUE),
-            propUnknown = mean(generalStatus == 'Unknown', na.rm = TRUE),
-            propDied = mean(generalStatus == 'Died', na.rm = TRUE)) %>%
-  gather(key = status, value = proportion, propNormal:propDied) %>%
-  mutate(time.f = factor(timept,
-                         levels = c(1:3, 5:6),
-                         labels = c('In-Hospital', '3 Months', '12 Months', '4 Years', '6 Years')),
-         status.f = factor(ifelse(timept == 1 & status == 'propNormal', 1,
-                           ifelse(timept == 1 & status == 'propImpaired', 2,
-                           ifelse(timept == 1 & status == 'propDied', 3,
-                           ifelse(status == 'propNormal', 4,
-                           ifelse(status == 'propImpaired', 5,
-                           ifelse(status == 'propUnknown', 6,
-                           ifelse(status == 'propDied', 7, NA))))))),
-                           levels = 1:7,
-                           labels = c('No\nbaseline\nCI',
-                                      'Mild\nCI,\nbaseline',
-                                      'Died\nin\nhospital',
-                                      'No CI',
-                                      'CI',
-                                      'Unknown',
-                                      'Died'))) %>%
-  filter(proportion > 0)
+```{r bar_functions}
 
-ggbarAll <- ggplot(data = bardataAll, aes(x = status.f, y = proportion)) +
-  facet_wrap(~ time.f, scales = 'free_x', nrow = 1, drop = TRUE) +
-  geom_bar(aes(fill = status), stat = 'identity') +
-  scale_fill_manual(values = viridis(4)[1:4]) +
-  scale_x_discrete(name = NULL) +
-  scale_y_continuous(name = NULL,
-                     limits = c(0, 1),
-                     breaks = seq(0, 1, 0.1),
-                     labels = paste0(seq(0, 1, 0.1)*100, '%')) +
-  labs(title = 'Status by Time Point among All Patients',
-       caption = paste('Proportion of all', length(keepPts),
-                       'patients who remained in the study throughout their hospital stay.\n"Cognitive impairment" (CI) is defined by RBANS global score <=78 and/or Trailmaking A or B score <=35.')) +
-  # theme_minimal() +
-  theme(legend.position = 'none',
-        strip.text = element_text(face = 'bold'),
-        axis.ticks.x = element_blank(),
-        axis.text.x = element_text(size = 7.5),
-        plot.caption = element_text(face = 'italic', colour = 'grey40'))
+createBarData <- function(df = brainStatus,
+                          impairType = c('overall', 'delayedmem')){
+  
+  ## impairType: whether to look at overall cognitive impairment or specifically delayed memory
+  ## Default: overall
+  impairType <- match.arg(impairType)
+  
+  ## If we're looking specifically at delayed memory, remove overall generalStatus variable and
+  ## rename generalStatusDM; set text for impairment-related factor labels
+  if(impairType == 'delayedmem'){
+    df <- df %>%
+      dplyr::select(-generalStatus) %>%
+      rename(generalStatus = generalStatusDM)
+    
+    noImpText <- 'No imp.'
+    ImpText <- 'Impaired'
+  } else{
+    noImpText <- 'No CI'
+    ImpText <- 'CI'
+  }
+  
+  df %>%
+    group_by(timept) %>%
+    summarise(propNormal = mean(generalStatus %in% c('No baseline impairment',
+                                                     'Normal delayed memory',
+                                                     'Normal cognition'),
+                                na.rm = TRUE),
+              propImpaired = mean(generalStatus %in% c('Mild CI at baseline',
+                                                       'Impaired delayed memory',
+                                                       'Cognitive impairment'),
+                                  na.rm = TRUE),
+              propUnknown = mean(generalStatus == 'Unknown', na.rm = TRUE),
+              propDied = mean(generalStatus == 'Died', na.rm = TRUE)) %>%
+    gather(key = status, value = proportion, propNormal:propDied) %>%
+    mutate(time.f = factor(timept,
+                           levels = c(1:3, 5:6),
+                           labels = c('In-Hospital', '3 Months', '12 Months',
+                                      '4 Years', '6 Years')),
+           status.f = factor(ifelse(timept == 1 & status == 'propNormal', 1,
+                             ifelse(timept == 1 & status == 'propImpaired', 2,
+                             ifelse(timept == 1 & status == 'propDied', 3,
+                             ifelse(status == 'propNormal', 4,
+                             ifelse(status == 'propImpaired', 5,
+                             ifelse(status == 'propUnknown', 6,
+                             ifelse(status == 'propDied', 7, NA))))))),
+                             levels = 1:7,
+                             labels = c('No\nbaseline\nCI',
+                                        'Mild\nCI,\nbaseline',
+                                        'Died\nin\nhospital',
+                                        noImpText,
+                                        ImpText,
+                                        'Unknown',
+                                        'Died'))) %>%
+    filter(proportion > 0)
+}
+
+createBarPlot <- function(df,
+                          plotTitle,
+                          captionProp,
+                          captionCI = '"Cognitive impairment" (CI) is defined by RBANS global score <=78 and/or Trailmaking A or B score <=35.'){
+  
+  catColors <- viridis(4)
+  if(length(unique(subset(df, timept > 1)$status.f)) == 3){
+    catColors <- catColors[1:3]
+  } else if(length(unique(subset(df, timept > 1)$status.f)) == 2){
+    catColors <- catColors[2:3]
+  }
+  
+  ggplot(data = df, aes(x = status.f, y = proportion)) +
+    facet_wrap(~ time.f, scales = 'free_x', nrow = 1, drop = TRUE) +
+    geom_bar(aes(fill = status), stat = 'identity') +
+    scale_fill_manual(values = catColors) +
+    scale_x_discrete(name = NULL) +
+    scale_y_continuous(name = NULL,
+                       limits = c(0, 1),
+                       breaks = seq(0, 1, 0.1),
+                       labels = paste0(seq(0, 1, 0.1)*100, '%')) +
+    labs(title = plotTitle, caption = paste0(captionProp, '\n', captionCI)) +
+    theme(legend.position = 'none',
+          strip.text = element_text(face = 'bold'),
+          axis.ticks.x = element_blank(),
+          axis.text.x = element_text(size = 7.5),
+          plot.caption = element_text(face = 'italic', colour = 'grey40'))
+}
+  
+```
+
+```{r bar_allpts}
+bardataAll <- createBarData()
+ggbarAll <- createBarPlot(df = bardataAll,
+                          plotTitle = 'Status by Time Point among All Patients',
+                          captionProp = paste0('Proportion of all',
+                                               length(keepPts),
+                                               'patients who remained in the study throughout their hospital stay.'))
 
 ```
 
@@ -355,48 +403,10 @@ The plot below shows status (normal, impaired, or deceased) at each time point a
 all patients for whom status is known at each time point.
 
 ```{r bar_knownpts}
-bardataKnown <- brainStatus %>%
-  filter(generalStatus != 'Unknown') %>%
-  group_by(timept) %>%
-  summarise(propNormal = mean(generalStatus %in% c('No baseline impairment', 'Normal cognition'),
-                              na.rm = TRUE),
-            propImpaired = mean(generalStatus %in% c('Mild CI at baseline', 'Cognitive impairment'),
-                                na.rm = TRUE),
-            propDied = mean(generalStatus == 'Died', na.rm = TRUE)) %>%
-  gather(key = status, value = proportion, propNormal:propDied) %>%
-  mutate(time.f = factor(timept,
-                         levels = c(1:3, 5:6),
-                         labels = c('In-Hospital', '3 Months', '12 Months', '4 Years', '6 Years')),
-         status.f = factor(ifelse(timept == 1 & status == 'propNormal', 1,
-                           ifelse(timept == 1 & status == 'propImpaired', 2,
-                           ifelse(timept == 1 & status == 'propDied', 3,
-                           ifelse(status == 'propNormal', 4,
-                           ifelse(status == 'propImpaired', 5,
-                           ifelse(status == 'propDied', 6, NA)))))),
-                           levels = 1:6,
-                           labels = c('No\nbaseline\nCI',
-                                      'Mild\nCI,\nbaseline',
-                                      'Died\nin\nhospital',
-                                      'No CI',
-                                      'CI',
-                                      'Died')))
-
-ggbarKnown <- ggplot(data = bardataKnown, aes(x = status.f, y = proportion)) +
-  facet_wrap(~ time.f, scales = 'free_x', nrow = 1, drop = TRUE) +
-  geom_bar(aes(fill = status), stat = 'identity') +
-  scale_fill_manual(values = viridis(4)[1:3]) +
-  scale_x_discrete(name = NULL) +
-  scale_y_continuous(name = NULL,
-                     limits = c(0, 1),
-                     breaks = seq(0, 1, 0.1),
-                     labels = paste0(seq(0, 1, 0.1)*100, '%')) +
-  labs(title = 'Status by Time Point among Patients with Known Status',
-       caption = paste('Proportion of patients who had complete cognitive assessments or were known to be deceased.\n"Cognitive impairment" (CI) is defined by RBANS global score <=78 and/or Trailmaking A or B score <=35.')) +
-  theme(legend.position = 'none',
-        strip.text = element_text(face = 'bold'),
-        axis.ticks.x = element_blank(),
-        axis.text.x = element_text(size = 7.5),
-        plot.caption = element_text(face = 'italic', colour = 'grey40'))
+bardataKnown <- createBarData(brainStatus %>% filter(generalStatus != 'Unknown'))
+ggbarKnown <- createBarPlot(df = bardataKnown,
+                            plotTitle = 'Status by Time Point among Patients with Known Status',
+                            captionProp = 'Proportion of patients who had complete cognitive assessments or were known to be deceased.')
 
 ```
 
@@ -412,43 +422,11 @@ who had a complete cognitive assessment (or survived the hospital stay, in panel
 point.
 
 ```{r bar_assessedpts}
-bardataAssessed <- brainStatus %>%
-  filter(!(generalStatus %in% c('Died', 'Unknown'))) %>%
-  group_by(timept) %>%
-  summarise(propNormal = mean(generalStatus %in% c('No baseline impairment', 'Normal cognition'),
-                              na.rm = TRUE),
-            propImpaired = mean(generalStatus %in% c('Mild CI at baseline', 'Cognitive impairment'),
-                                na.rm = TRUE)) %>%
-  gather(key = status, value = proportion, propNormal:propImpaired) %>%
-  mutate(time.f = factor(timept,
-                         levels = c(1:3, 5:6),
-                         labels = c('Enrollment', '3 Months', '12 Months', '4 Years', '6 Years')),
-         status.f = factor(ifelse(timept == 1 & status == 'propNormal', 1,
-                           ifelse(timept == 1 & status == 'propImpaired', 2,
-                           ifelse(status == 'propNormal', 3,
-                           ifelse(status == 'propImpaired', 4, NA)))),
-                           levels = 1:4,
-                           labels = c('No baseline CI',
-                                      'Mild CI,\nbaseline',
-                                      'No CI',
-                                      'CI')))
-
-ggbarAssessed <- ggplot(data = bardataAssessed, aes(x = status.f, y = proportion)) +
-  facet_wrap(~ time.f, scales = 'free_x', nrow = 1, drop = TRUE) +
-  geom_bar(aes(fill = status), stat = 'identity') +
-  scale_fill_manual(values = viridis(4)[2:3]) +
-  scale_x_discrete(name = NULL) +
-  scale_y_continuous(name = NULL,
-                     limits = c(0, 1),
-                     breaks = seq(0, 1, 0.1),
-                     labels = paste0(seq(0, 1, 0.1)*100, '%')) +
-  labs(title = 'Status by Time Point among Patients with Complete Assessments',
-       caption = paste('Proportion of patients who had complete cognitive assessments (or survived hospital stay).\n"Cognitive impairment" (CI) is defined by RBANS global score <=78 and/or Trailmaking A or B score <=35.')) +
-  theme(legend.position = 'none',
-        strip.text = element_text(face = 'bold'),
-        axis.ticks.x = element_blank(),
-        axis.text.x = element_text(size = 7.5),
-        plot.caption = element_text(face = 'italic', colour = 'grey40'))
+bardataAssessed <- createBarData(brainStatus %>% filter(!(generalStatus %in% c('Died', 'Unknown')))) 
+ggbarAssessed <-
+  createBarPlot(df = bardataAssessed,
+                plotTitle = 'Status by Time Point among Patients with Complete Assessments',
+                captionProp = 'Proportion of patients who had complete cognitive assessments (or survived hospital stay).')
 
 ```
 
