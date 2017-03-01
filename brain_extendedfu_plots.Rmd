@@ -4,7 +4,7 @@ output:
   html_notebook:
     theme: yeti
     toc: yes
-    toc_depth: 2
+    toc_depth: 3
     toc_float: yes
     code_folding: hide
 ---
@@ -146,7 +146,13 @@ brainStatus <- reduce(list(shell_df, dfFirstDied, dfFirstWD), .f = left_join, by
                              paste(as.character(generalStatus), timelabel, sep = ', '))),
          sourceNodeDM = ifelse(timept == 1 & generalStatus != 'Died', as.character(generalStatusDM),
                         ifelse(timept == 1, paste(as.character(generalStatusDM), timelabel),
-                               paste(as.character(generalStatusDM), timelabel, sep = ', ')))) %>%
+                               paste(as.character(generalStatusDM), timelabel, sep = ', '))),
+         ## Add indicator variables for faceting barcharts
+         ageGroup65 = factor(ifelse(id %in% ptsg65, 1, 0), levels = 0:1, labels = c('<65', '>=65')),
+         ageGroup75 = factor(ifelse(id %in% ptsg75, 1, 0), levels = 0:1, labels = c('<75', '>=75')),
+         icuType = factor(ifelse(id %in% ptsMICU, 0,
+                          ifelse(id %in% ptsSICU, 1, NA)),
+                          levels = 0:1, labels = c('MICU', 'SICU'))) %>%
   arrange(id, timept)
 
 ```
@@ -293,6 +299,7 @@ contacted, and who had incomplete assessments.
 ```{r bar_functions}
 
 createBarData <- function(df = brainStatus,
+                          facetVar = NULL,
                           impairType = c('overall', 'delayedmem')){
   
   ## impairType: whether to look at overall cognitive impairment or specifically delayed memory
@@ -313,8 +320,15 @@ createBarData <- function(df = brainStatus,
     ImpText <- 'CI'
   }
   
+  ## Set grouping columns: always by time point, including faceting variable if specified
+  if(!is.null(facetVar)){
+    groupCols <- c('timept', facetVar)
+  } else{
+    groupCols <- 'timept'
+  }
+  
   df %>%
-    group_by(timept) %>%
+    group_by_(.dots = groupCols) %>%
     summarise(propNormal = mean(generalStatus %in% c('No baseline impairment',
                                                      'Normal delayed memory',
                                                      'Normal cognition'),
@@ -349,6 +363,7 @@ createBarData <- function(df = brainStatus,
 }
 
 createBarPlot <- function(df,
+                          facetVar = NULL,
                           plotTitle,
                           captionProp,
                           captionCI = '"Cognitive impairment" (CI) is defined by RBANS global score <=78 and/or Trailmaking A or B score <=35.'){
@@ -360,8 +375,18 @@ createBarPlot <- function(df,
     catColors <- catColors[2:3]
   }
   
-  ggplot(data = df, aes(x = status.f, y = proportion)) +
-    facet_wrap(~ time.f, scales = 'free_x', nrow = 1, drop = TRUE) +
+  p <- ggplot(data = df, aes(x = status.f, y = proportion))
+  
+  if(!is.null(facetVar)){
+    p <- p + facet_grid(as.formula(paste(facetVar, '~ time.f')), scales = 'free_x', drop = TRUE)
+    axisYSize <- 6.5
+  } else{
+    p <- p +
+      facet_wrap(~ time.f, scales = 'free_x', nrow = 1, drop = TRUE)
+    axisYSize <- 9
+  }
+  
+  p <- p +
     geom_bar(aes(fill = status), stat = 'identity') +
     scale_fill_manual(values = catColors) +
     scale_x_discrete(name = NULL) +
@@ -374,7 +399,10 @@ createBarPlot <- function(df,
           strip.text = element_text(face = 'bold'),
           axis.ticks.x = element_blank(),
           axis.text.x = element_text(size = 7.5),
+          axis.text.y = element_text(size = axisYSize),
           plot.caption = element_text(face = 'italic', colour = 'grey40'))
+  
+  return(p)
 }
   
 ```
@@ -501,5 +529,98 @@ ggbarDMAssessed <-
 
 ```{r print_bar_dm_assessedpts, results = 'asis'}
 ggbarDMAssessed
+
+```
+
+# Cognitive Impairment by Age Group
+
+We want to see whether the progression and incidence of cognitive impairment is different for older
+vs younger patients. We'll define "older" in two ways: >=65 and >=75 years old at the time of
+initial BRAIN-ICU enrollment.
+
+## <65 vs >=65 at Enrollment
+### Progress Throughout Study
+
+```{r sankey_65}
+sankeyDatag65 <- createSankeyData(df = brainStatus %>% filter(id %in% pts65))
+sankeyPlotg65 <- createSankeyPlot(sankeyDatag65)
+
+sankeyDatal65 <- createSankeyData(df = brainStatus %>% filter(id %in% ptsl65))
+sankeyPlotl65 <- createSankeyPlot(sankeyDatal65)
+
+```
+
+#### Patients >= 65 at Enrollment
+```{r print_sankey_g65, results = 'asis'}
+## For creating separate file
+# print(gvisBRAIN, file = 'brain_phase3_sankey.html')
+print(sankeyPlotg65, tag = 'chart')
+
+```
+
+#### Patients < 65 at Enrollment
+```{r print_sankey_l65, results = 'asis'}
+## For creating separate file
+# print(gvisBRAIN, file = 'brain_phase3_sankey.html')
+print(sankeyPlotl65, tag = 'chart')
+
+```
+
+### Status at Each Time Point, All Patients
+
+```{r bar_65_allpts}
+bardata65All <- createBarData(facetVar = 'ageGroup65')
+ggbar65All <- createBarPlot(df = bardata65All,
+                            facetVar = 'ageGroup65',
+                            plotTitle = 'Status by Time Point among All Patients, Split at Age 65',
+                            captionProp = paste('Proportion of all patients who remained in the study throughout their hospital stay.'))
+
+```
+
+```{r print_bar_65_allpts, results = 'asis'}
+ggbar65All
+
+```
+
+### Status at Each Time Point, Patients with Known Status
+
+The plot below shows status (normal, impaired, or deceased) at each time point as a proportion of
+all patients for whom status is known at each time point.
+
+```{r bar_65_knownpts}
+bardata65Known <- createBarData(brainStatus %>% filter(generalStatus != 'Unknown'),
+                                facetVar = 'ageGroup65')
+ggbar65Known <- createBarPlot(df = bardata65Known,
+                              facetVar = 'ageGroup65',
+                              plotTitle = 'Status by Time Point among Patients with Known Status, Split at Age 65',
+                              captionProp = 'Proportion of patients who had complete cognitive assessments or were known to be deceased.')
+
+```
+
+```{r print_bar_65_knownpts, results = 'asis'}
+ggbar65Known
+
+```
+
+### Status at Each Time Point, Patients with Complete Assessment
+
+The plot below shows status (normal or impaired) at each time point as a proportion of all patients
+who had a complete cognitive assessment (or survived the hospital stay, in panel 1) at each time
+point.
+
+```{r bar_65_assessedpts}
+bardata65Assessed <- createBarData(brainStatus %>%
+                                     filter(!(generalStatus %in% c('Died', 'Unknown'))),
+                                   facetVar = 'ageGroup65')
+ggbar65Assessed <-
+  createBarPlot(df = bardata65Assessed,
+                facetVar = 'ageGroup65',
+                plotTitle = 'Status by Time Point among Patients with Complete Assessments, Split at Age 65',
+                captionProp = 'Proportion of patients who had complete cognitive assessments (or survived hospital stay, Panel 1).')
+
+```
+
+```{r print_bar_65_assessedpts, results = 'asis'}
+ggbar65Assessed
 
 ```
