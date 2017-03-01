@@ -711,3 +711,92 @@ ggbar75Assessed <-
 ggbar75Assessed
 
 ```
+
+# MICU vs SICU Admissions
+The following plots show impairment for patients admitted to the MICU vs the SICU.
+
+## Progress Throughout Study
+
+```{r sankey_icu}
+sankeyDataMI <- createSankeyData(df = brainStatus %>% filter(id %in% ptsMICU))
+sankeyPlotMI <- createSankeyPlot(sankeyDataMI)
+
+sankeyDataSI <- createSankeyData(df = brainStatus %>% filter(id %in% ptsSICU))
+sankeyPlotSI <- createSankeyPlot(sankeyDataSI)
+
+```
+
+### MICU Patients
+```{r print_sankey_mi, results = 'asis'}
+## For creating separate file
+# print(gvisBRAIN, file = 'brain_phase3_sankey.html')
+print(sankeyPlotMI, tag = 'chart')
+
+```
+
+### SICU Patients
+```{r print_sankey_si, results = 'asis'}
+## For creating separate file
+# print(gvisBRAIN, file = 'brain_phase3_sankey.html')
+print(sankeyPlotSI, tag = 'chart')
+
+```
+
+## Status at Each Time Point, All Patients
+
+```{r bar_ICU_allpts}
+bardataICUAll <- createBarData(facetVar = 'icuType')
+ggbarICUAll <- createBarPlot(df = bardataICUAll,
+                             facetVar = 'icuType',
+                             plotTitle = 'Status by Time Point among All Patients by ICU Type',
+                             captionProp = paste('Proportion of all patients who remained in the study throughout their hospital stay.'))
+
+```
+
+```{r print_bar_ICU_allpts, results = 'asis'}
+ggbarICUAll
+
+```
+
+### Status at Each Time Point, Patients with Known Status
+
+The plot below shows status (normal, impaired, or deceased) at each time point as a proportion of
+all patients for whom status is known at each time point.
+
+```{r bar_ICU_knownpts}
+bardataICUKnown <- createBarData(brainStatus %>% filter(generalStatus != 'Unknown'),
+                                 facetVar = 'icuType')
+ggbarICUKnown <- createBarPlot(df = bardataICUKnown,
+                               facetVar = 'icuType',
+                               plotTitle = 'Status by Time Point among Patients with Known Status by ICU Type',
+                               captionProp = 'Proportion of patients who had complete cognitive assessments or were known to be deceased.')
+
+```
+
+```{r print_bar_ICU_knownpts, results = 'asis'}
+ggbarICUKnown
+
+```
+
+### Status at Each Time Point, Patients with Complete Assessment
+
+The plot below shows status (normal or impaired) at each time point as a proportion of all patients
+who had a complete cognitive assessment (or survived the hospital stay, in panel 1) at each time
+point.
+
+```{r bar_ICU_assessedpts}
+bardataICUAssessed <- createBarData(brainStatus %>%
+                                      filter(!(generalStatus %in% c('Died', 'Unknown'))),
+                                    facetVar = 'icuType')
+ggbarICUAssessed <-
+  createBarPlot(df = bardataICUAssessed,
+                facetVar = 'icuType',
+                plotTitle = 'Status by Time Point among Patients with Complete Assessments by ICU Type',
+                captionProp = 'Proportion of patients who had complete cognitive assessments (or survived hospital stay, Panel 1).')
+
+```
+
+```{r print_bar_ICU_assessedpts, results = 'asis'}
+ggbarICUAssessed
+
+```
