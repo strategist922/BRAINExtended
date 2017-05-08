@@ -9,8 +9,9 @@ output:
     code_folding: hide
 ---
 
-```{r setup}
+```{r setup, message = FALSE}
 knitr::opts_chunk$set(message = FALSE, fig.width = 8.5)
+suppressPackageStartupMessages(library(googleVis))
 
 ## Option to print only chart aspect of googleVis objects, not full HTML
 op <- options(gvis.plot.tag='chart')
