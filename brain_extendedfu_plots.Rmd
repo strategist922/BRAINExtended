@@ -17,7 +17,7 @@ suppressPackageStartupMessages(library(googleVis))
 op <- options(gvis.plot.tag='chart')
 
 library(tidyverse)
-library(googleVis)
+# library(googleVis)
 library(viridis)
 
 ## -- Load data, stored in separate directory ------------------------------------------------------
@@ -170,12 +170,19 @@ likely that these patients would have performed more poorly on those assessments
 # Broad Cognitive Impairment among Entire BRAIN-ICU Cohort
 ## Progress Throughout Study
 
-The following Sankey plot shows patient progression throughout the six years of BRAIN-ICU enrollment
-and followup.
+### All Time Points
+The following Sankey plot shows progression for all patients who remained in the study throughout
+their hospital stay during the six years of BRAIN-ICU enrollment and followup, including all time
+points (ICU admission and followup at 3 months, 12 months, 4 years and 6 years after discharge).
 
 ```{r sankey_functions}
 ## -- Function to create Sankey plot data given a data frame (brainStatus or a subset) -------------
+## df: data.frame to start with
+## keepNodes: which source/target nodes should we include? Default is to keep all.
+##  1 = baseline, 2 = 3m, 3 = 12m, 5 = 4y, 6 = 6y (4 was 12m mortality form).
+## impairType: global (default) or delayed memory RBANS
 createSankeyData <- function(df = brainStatus,
+                             keepNodes = 1:5,
                              impairType = c('overall', 'delayedmem')){
   
   ## impairType: whether to look at overall cognitive impairment or specifically delayed memory
@@ -192,6 +199,7 @@ createSankeyData <- function(df = brainStatus,
   
   ## Create data.frame
   sankeyData <- df %>%
+    filter(timept %in% keepNodes) %>%
     group_by(id) %>%
     mutate(targetNode = lead(sourceNode)) %>%
     ungroup() %>%
@@ -249,10 +257,28 @@ createSankeyData <- function(df = brainStatus,
 
 ## -- Function to create googleVis Sankey plot using data from createSankeyData --------------------
 createSankeyPlot <- function(sData){
+  
+  ## Does sData include all nodes at each time point, or just a subset?
+  if(length(grep("Died", unique(sData$targetNode))) > 0){
+    sankey_colors <- "'#3D7900', '#3D7900', '#AC0001', '#0057AC', 'black', '#AC0001', 'black', '#3D7900', '#AC0001', '#0057AC', 'black', '#3D7900', '#AC0001', '#0057AC', 'black', '#3D7900', '#AC0001', '#0057AC', 'black'"
+  } else {
+    sankey_colors <- "'#3D7900', '#3D7900', '#AC0001', '#AC0001', '#3D7900', '#AC0001'"
+    ## no baseline impairment; normal, 12m; CI, 12m; mild CI at baseline; normal, 6y; CI, 6y
+  }
+  
   ## 0057AC: blue (unknown)
   ## 3D7900: green (normal)
   ## AC0001: red (impaired)
   ## black: died
+  
+  ## Create string to specify all sankey options
+  sankey_options <- paste("{link: { colorMode: 'gradient' },
+                            node: { colors: [", sankey_colors, "],
+                                    label: { color: '#003D79',
+                                             fontSize: 14,
+                                             bold: true } },
+                                    iterations: 0
+                           }")
   
   ## Create googleVis object
   gvisBRAIN <- gvisSankey(sData,
@@ -260,19 +286,7 @@ createSankeyPlot <- function(sData){
                           to = 'targetNode',
                           weight = 'weight',
                           options = list(height = 600, width = 800, tooltip = "{isHtml:'True'}",
-                                         sankey = "{link: { colorMode: 'gradient' },
-                                                  node: { colors: ['#3D7900', '#3D7900', '#AC0001',
-                                                                   '#0057AC', 'black', '#AC0001',
-                                                                   'black', '#3D7900', '#AC0001',
-                                                                   '#0057AC', 'black', '#3D7900',
-                                                                   '#AC0001', '#0057AC', 'black',
-                                                                   '#3D7900', '#AC0001', '#0057AC',
-                                                                   'black'],
-                                                          label: { color: '#003D79',
-                                                                   fontSize: 14,
-                                                                   bold: true } },
-                                                  iterations: 0
-                                                 }"))
+                                         sankey = sankey_options))
 }
 
 ```
@@ -287,6 +301,84 @@ sankeyPlotAll <- createSankeyPlot(sankeyDataAll)
 ## For creating separate file
 # print(gvisBRAIN, file = 'brain_phase3_sankey.html')
 print(sankeyPlotAll, tag = 'chart')
+
+```
+
+### Baseline and 12 Months Only, All Patients
+This plot shows one-year progression for all BRAIN-ICU patients who remained in the study throughout
+their hospital stay.
+
+```{r sankey_overall_base12}
+sankeyDataBase12 <- createSankeyData(keepNodes = c(1, 3))
+sankeyPlotBase12 <- createSankeyPlot(sankeyDataBase12)
+
+```
+
+```{r print_sankey_base12, results = 'asis'}
+## For creating separate file
+# print(sankeyPlotBase12, file = 'brain_phase3_sankey_base12.html')
+print(sankeyPlotBase12, tag = 'chart')
+
+```
+
+### Baseline and 12 Months Only, Patients Assessed at Each Point
+This plot shows cognitive impairment at ICU admission and 12-month followup for all patients who
+were assessed at *both* time points (IQCODE at ICU admission, RBANS global/Trails B at followup).
+
+```{r sankey_assessed_base12}
+assessed_base <- subset(shell_df, timept == 1 & !died_now & !wd_now)$id
+assessed_12m <- subset(shell_df,
+                       timept == 3 & (!is.na(rbans.global.score) | !is.na(trail.b.tscore)))$id
+
+brainStatusAssessed12 <- subset(brainStatus, id %in% intersect(assessed_base, assessed_12m))
+
+sankeyDataAssessedBase12 <- createSankeyData(df = brainStatusAssessed12, keepNodes = c(1, 3))
+sankeyPlotAssessedBase12 <- createSankeyPlot(sankeyDataAssessedBase12)
+
+```
+
+```{r print_sankey_assessed_base12, results = 'asis'}
+## For creating separate file
+# print(sankeyPlotAssessedBase12, file = 'brain_phase3_sankey_assessed_base12.html')
+print(sankeyPlotAssessedBase12, tag = 'chart')
+
+```
+
+### Baseline, 12 Months and 6 Years Only, All Patients
+This plot shows the progression of all patients who remained in the study throughout their hospital
+stay at 12-month and 6-year followup.
+
+```{r sankey_overall_base126}
+sankeyDataBase126 <- createSankeyData(keepNodes = c(1, 3, 6))
+sankeyPlotBase126 <- createSankeyPlot(sankeyDataBase126)
+
+```
+
+```{r print_sankey_base126, results = 'asis'}
+## For creating separate file
+# print(sankeyPlotBase126, file = 'brain_phase3_sankey_base126.html')
+print(sankeyPlotBase126, tag = 'chart')
+
+```
+
+### Baseline, 12 Months and 6 Years Only, Patients Assessed at Each Point
+This plot shows progression of all patients who were assessed at baseline (IQCODE), 12-month *and* 6-year followup (RBANS global/Trails B).
+
+```{r sankey_assessed_base126}
+assessed_6y <- subset(shell_df,
+                      timept == 6 & (!is.na(rbans.global.score) | !is.na(trail.b.tscore)))$id
+
+brainStatusAssessed126 <- subset(brainStatus, id %in% intersect(assessed_12m, assessed_6y))
+
+sankeyDataAssessedBase126 <- createSankeyData(df = brainStatusAssessed126, keepNodes = c(1, 3, 6))
+sankeyPlotAssessedBase126 <- createSankeyPlot(sankeyDataAssessedBase126)
+
+```
+
+```{r print_sankey_assessed_base126, results = 'asis'}
+## For creating separate file
+# print(sankeyPlotAssessedBase126, file = 'brain_phase3_sankey_assessed_base126.html')
+print(sankeyPlotAssessedBase126, tag = 'chart')
 
 ```
 
