@@ -893,3 +893,28 @@ ggbarICUAssessed <-
 ggbarICUAssessed
 
 ```
+
+# Patients with Unknown Status
+```{r unknowns}
+## List of all unknown patients
+unknown.ids <- unique(subset(brainStatus, timept == 6 & generalStatus == 'Unknown')$id)
+
+## For each one, list status at each time point, along with birth, death, withdrawal dates
+unknown.data <- brain.oneobs %>%
+  filter(id %in% unknown.ids) %>%
+  dplyr::select(id, birth.date)
+
+## Write to CSV; may be better for Amy/Erin
+write_csv(unknown.data, path = "brain_unknown_6yrs.csv")
+
+```
+
+To assist the followup team, the IDs and birth dates of all `r length(unknown.ids)` patients whose
+status is "Unknown" at 6-year followup are shown below. For convenience, a downloadable CSV file is
+[also available on Box](https://vumc.box.com/s/fz4qpms9hlsa9q2kq8746n8zhgn0ze7h) (must have permissions to access).
+
+```{r show_unknowns}
+unknown.data
+
+```
+
