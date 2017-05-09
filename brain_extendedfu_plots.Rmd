@@ -382,6 +382,41 @@ print(sankeyPlotAssessedBase126, tag = 'chart')
 
 ```
 
+### Baseline and 6 Years Only, All Patients
+This plot shows the progression of all patients who remained in the study throughout their hospital
+stay at 6-year followup.
+
+```{r sankey_overall_base6}
+sankeyDataBase6 <- createSankeyData(keepNodes = c(1, 6))
+sankeyPlotBase6 <- createSankeyPlot(sankeyDataBase6)
+
+```
+
+```{r print_sankey_base6, results = 'asis'}
+## For creating separate file
+# print(sankeyPlotBase6, file = 'brain_phase3_sankey_base6.html')
+print(sankeyPlotBase6, tag = 'chart')
+
+```
+
+### Baseline and 6 Years Only, Patients Assessed at Each Point
+This plot shows progression of all patients who were assessed at baseline (IQCODE) *and* 6-year followup (RBANS global/Trails B).
+
+```{r sankey_assessed_base6}
+brainStatusAssessedBase6 <- subset(brainStatus, id %in% intersect(assessed_base, assessed_6y))
+
+sankeyDataAssessedBase6 <- createSankeyData(df = brainStatusAssessedBase6, keepNodes = c(1, 6))
+sankeyPlotAssessedBase6 <- createSankeyPlot(sankeyDataAssessedBase6)
+
+```
+
+```{r print_sankey_assessed_base6, results = 'asis'}
+## For creating separate file
+# print(sankeyPlotAssessedBase6, file = 'brain_phase3_sankey_assessed_base6.html')
+print(sankeyPlotAssessedBase6, tag = 'chart')
+
+```
+
 ## Status at Each Time Point, All Patients
 
 The plot below shows status (normal, impaired, unknown, or deceased) at each time point as a
