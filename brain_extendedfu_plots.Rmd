@@ -182,7 +182,7 @@ points (ICU admission and followup at 3 months, 12 months, 4 years and 6 years a
 ##  1 = baseline, 2 = 3m, 3 = 12m, 5 = 4y, 6 = 6y (4 was 12m mortality form).
 ## impairType: global (default) or delayed memory RBANS
 createSankeyData <- function(df = brainStatus,
-                             keepNodes = 1:5,
+                             keepNodes = 1:6,
                              impairType = c('overall', 'delayedmem')){
   
   ## impairType: whether to look at overall cognitive impairment or specifically delayed memory
@@ -341,6 +341,22 @@ sankeyPlotAssessedBase12 <- createSankeyPlot(sankeyDataAssessedBase12)
 ## For creating separate file
 # print(sankeyPlotAssessedBase12, file = 'brain_phase3_sankey_assessed_base12.html')
 print(sankeyPlotAssessedBase12, tag = 'chart')
+
+```
+
+### Baseline and 4 Years Only, All Patients
+This plot shows four-year progression for all BRAIN-ICU patients who remained in the study throughout their hospital stay.
+
+```{r sankey_overall_base4}
+sankeyDataBase4 <- createSankeyData(keepNodes = c(1, 5))
+sankeyPlotBase4 <- createSankeyPlot(sankeyDataBase4)
+
+```
+
+```{r print_sankey_base4, results = 'asis'}
+## For creating separate file
+# print(sankeyPlotBase4, file = 'brain_phase3_sankey_base4.html')
+print(sankeyPlotBase4, tag = 'chart')
 
 ```
 
